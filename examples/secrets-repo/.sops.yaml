@@ -1,0 +1,18 @@
+# Example .sops.yaml for the noa-install demo. Modeled on a real multi-host
+# secrets repo: one "admin" identity with access to everything, plus a
+# per-host key added automatically by `upsert-sops-age-key` when noa-install
+# bootstraps a new host (see examples/README.md).
+#
+# admin-key.txt (generated with `age-keygen`) is DEMO-ONLY and gitignored -
+# never commit real private keys like this to a real secrets repo.
+keys:
+  - &admin age18m2wtpwyk39hh99td2n396gurcm935c3hzyytg6f062wsnkdsa7qq4cfex
+keygroups:
+  all: &all
+    - *admin
+creation_rules:
+  - path_regex: secrets\.yaml
+    age: *all
+  - path_regex: 'systems/.*/sshkeys/.*\.yaml'
+    age:
+      - *admin
