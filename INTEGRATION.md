@@ -13,7 +13,8 @@ plugs into a real setup.
    [Snowfall-lib](https://snowfall.org), that's just `systems/<system>/<hostname>/default.nix` and you're
    already set up correctly. If not, see [Non-Snowfall layouts](#non-snowfall-layouts) below.
 2. **A sops secrets repo** with a `.sops.yaml` using the `keys:` + `creation_rules:` shape (anchors
-   under `keys:`, `age:` groups in `creation_rules:` referencing them by alias) - this is the standard
+   under `keys:`, referenced by alias from the `age:` field of each `creation_rules:` entry — either
+   directly or via a named group under an optional `keygroups:` block) - this is the standard
    [sops](https://github.com/getsops/sops) config format, not something specific to this tool. If
    you don't have per-host SSH keys and age identities yet, `noa-install` will create the first one
    for you on its first run.
@@ -24,21 +25,22 @@ If your secrets repo doesn't have a `.sops.yaml` at all yet, create a minimal on
 # .sops.yaml
 keys:
   - &admin age1...your own age public key...
+keygroups:
+  all: &all
+    - *admin
 creation_rules:
   - path_regex: secrets\.yaml
-    key_groups:
-      - age:
-          - *admin
+    age: *all
   - path_regex: 'systems/.*/sshkeys/.*\.yaml'
-    key_groups:
-      - age:
-          - *admin
+    age:
+      - *admin
 ```
 
 The second rule is what lets `create-ssh-host-keys` encrypt the SSH keys it generates for new hosts -
 without a rule matching `systems/<hostname>/sshkeys/*.yaml`, `sops encrypt` has no recipients to
-encrypt to and will fail. See [`examples/secrets-repo/.sops.yaml`](./examples/secrets-repo/.sops.yaml)
-for a copy of exactly this.
+encrypt to and will fail. `upsert-sops-age-key` also still supports the legacy `key_groups:` shape if
+that's what your existing repo already uses. See
+[`examples/secrets-repo/.sops.yaml`](./examples/secrets-repo/.sops.yaml) for a copy of exactly this.
 
 ## 1. Run it directly (no flake changes needed)
 

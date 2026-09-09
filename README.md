@@ -40,7 +40,8 @@ working directory, not an argument):
 **The secrets repo** (passed via `--secrets-repo`):
 
 - A `.sops.yaml` with a top-level `keys:` list of `&anchor age1...` entries and a `creation_rules:`
-  list containing at least one `- age:` key group — `upsert-sops-age-key` edits this file in place.
+  list containing at least one matching entry with an `age:` recipient list (inline or via an alias
+  into a `keygroups:` block) — `upsert-sops-age-key` edits this file in place.
 - A secrets file to re-encrypt (default `secrets.yaml` at the repo root; override with
   `--secrets-file` if yours lives elsewhere, e.g. `users/foo/secrets.yaml`).
 - `systems/<hostname>/sshkeys/` need not exist yet; it's created on first run.
