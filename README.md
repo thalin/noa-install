@@ -53,7 +53,7 @@ private inputs.
 ## Usage
 
 ```console
-nix run github:<you>/noa-install#noa-install -- \
+nix run github:thalin/noa-install#noa-install -- \
   -h myhost \
   -i 192.168.1.50 \
   -s /path/to/secrets-repo
@@ -114,7 +114,22 @@ user: root
 With that in place, provisioning a new host only needs the two things that actually change:
 
 ```console
-nix run github:<you>/noa-install#noa-install -- -h myhost -i 192.168.1.50
+nix run github:thalin/noa-install#noa-install -- -h myhost -i 192.168.1.50
+```
+
+## Bootable installer ISO
+
+`nixosConfigurations.noa` (`systems/x86_64-linux/noa/`) is a minimal NixOS installer ISO for targets
+that don't already have SSH-reachable Linux running — nixos-anywhere can kexec from any such box, so
+this is only needed for genuinely bare metal (nothing bootable on it yet). Write it to a USB drive,
+boot the target from it, then run `noa-install` against the IP it comes up with.
+
+It grants SSH access to whichever pubkeys exist in `~/.ssh/*.pub` for whoever *builds* the ISO, not
+to a fixed key baked into the repo — there's no single owner of a generic install tool. Reading
+`$HOME` needs impure evaluation, so build it with:
+
+```console
+nix build --impure .#nixosConfigurations.noa.config.system.build.isoImage
 ```
 
 ## Packages

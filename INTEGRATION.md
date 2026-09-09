@@ -48,7 +48,7 @@ The quickest way to use this needs no changes to your flake at all - `noa-instal
 self-contained, so you can just run it straight from GitHub against your existing host-config flake:
 
 ```console
-nix run github:<you>/noa-install#noa-install -- \
+nix run github:thalin/noa-install#noa-install -- \
   -h myhost \
   -i 192.168.1.50 \
   -s /path/to/your/secrets-repo
@@ -66,7 +66,7 @@ your `flake.lock` like any other input), add it and re-export its package:
 ```nix
 inputs = {
   # ...
-  noa-install.url = "github:<you>/noa-install";
+  noa-install.url = "github:thalin/noa-install";
 };
 
 # in outputs, wherever you build packages.${system}:
@@ -90,7 +90,7 @@ predecessor did), wiring up a recipe makes this a one-liner:
 # Provision a new host. Target should be reachable via SSH as root
 # (booted into any NixOS installer/rescue environment, or already NixOS).
 install hostname ipaddr:
-    nix run github:<you>/noa-install#noa-install -- -h {{hostname}} -i {{ipaddr}} -s ../nix-secrets
+    nix run github:thalin/noa-install#noa-install -- -h {{hostname}} -i {{ipaddr}} -s ../nix-secrets
 ```
 
 Adjust the `-s` path to wherever your secrets repo actually lives relative to your host-config repo.
@@ -120,7 +120,7 @@ Command line flags still override both, so `-h`/`-i` per invocation plus a confi
 everything else is usually the sweet spot:
 
 ```console
-nix run github:<you>/noa-install#noa-install -- -h myhost -i 192.168.1.50
+nix run github:thalin/noa-install#noa-install -- -h myhost -i 192.168.1.50
 ```
 
 See the main README's [Config file](./README.md#config-file) section for the full precedence order
@@ -135,7 +135,7 @@ bootstrapping - otherwise your flake's lock file still points at the pre-bootstr
 be visible yet:
 
 ```console
-nix run github:<you>/noa-install#noa-install -- \
+nix run github:thalin/noa-install#noa-install -- \
   -h myhost -i 192.168.1.50 -s /path/to/secrets-repo \
   --secrets-input nix-secrets
 ```
