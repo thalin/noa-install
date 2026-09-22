@@ -42,6 +42,7 @@ CONFIG_DEFAULTS = {
 NIX_BIN = "@nix@"
 NIXOS_ANYWHERE_BIN = "@nixos_anywhere@"
 SOPS_BIN = "@sops@"
+GIT_BIN = "@git@"
 CREATE_SSH_HOST_KEYS_BIN = "@create_ssh_host_keys@"
 UPSERT_SOPS_AGE_KEY_BIN = "@upsert_sops_age_key@"
 
@@ -252,6 +253,26 @@ def resolve_settings(args):
     return settings
 
 
+def git_add(repo_path, paths):
+    """Stages the given paths in repo_path's git index, if it's a git repo.
+
+    A flake `path:` input that happens to live inside a git working tree is
+    only visible to Nix's evaluator up to whatever's staged in the git index
+    - raw uncommitted-and-unstaged changes on disk are invisible to it. Since
+    create-ssh-host-keys/upsert-sops-age-key/sops updatekeys only write to
+    disk, anything they touch has to be staged here or the very next flake
+    evaluation (nixos-anywhere building `.#<hostname>`) still sees the
+    pre-update secrets and fails to decrypt for the new host's age key.
+    Silently a no-op if the secrets repo isn't a git repo at all.
+    """
+    if not (repo_path / ".git").exists():
+        return
+    existing = [str(p) for p in paths if Path(p).exists()]
+    if not existing:
+        return
+    run_command([GIT_BIN, "-C", str(repo_path), "add", "--"] + existing)
+
+
 def ensure_ssh_keys(hostname, secrets_repo_path, ed25519_key_path, rsa_key_path):
     """Checks if SSH keys exist and generates them if necessary."""
     keys_existed = ed25519_key_path.exists() and rsa_key_path.exists()
@@ -357,6 +378,16 @@ def main():
 
     if not keys_existed:
         update_sops_config(settings["hostname"], secrets_repo_path, settings["secrets_file"])
+
+    # Stage whatever's current in the secrets repo unconditionally - not just
+    # when *this* run wrote it. If an earlier run wrote these files but was
+    # interrupted before reaching this point (e.g. it crashed partway through
+    # nixos-anywhere), they'd still be sitting there unstaged; a `path:` flake
+    # input pointing at a git repo only sees the git index, so the next flake
+    # evaluation needs them staged regardless of which run actually wrote
+    # them. No-op if everything's already staged/committed or unchanged.
+    git_add(secrets_repo_path, [ed25519_key_path, rsa_key_path])
+    git_add(secrets_repo_path, [secrets_repo_path / ".sops.yaml", secrets_repo_path / settings["secrets_file"]])
 
     if settings["secrets_input"]:
         update_secrets_input(settings["secrets_input"])

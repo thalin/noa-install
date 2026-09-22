@@ -22,7 +22,8 @@ Given a hostname, an IP, and a path to a sops secrets repo, `noa-install`:
    of every `creation_rules:` entry whose `path_regex` matches `--secrets-file` (default `secrets.yaml`).
 4. Runs `sops updatekeys` on the secrets file so it's re-encrypted for the new key.
 5. Optionally runs `nix flake update <name>` in the current directory, in case the secrets repo is
-   consumed as a non-path flake input that needs to pick up the change (see `--secrets-input` below).
+   consumed as a flake input that needs to pick up the change (see `--secrets-input` below - this
+   applies even if that input is a local `path:` one).
 6. Decrypts the new SSH host keys and stages them as extra files.
 7. Runs `nixos-anywhere` against `.#<hostname>` in the current directory, installing NixOS on the
    target and pre-seeding it with the same SSH host keys that were just registered in the secrets repo
@@ -76,7 +77,7 @@ it must be passed on the command line specifically.
 | `-s, --secrets-repo` | yes* | | Path to the sops secrets repo |
 | `-u, --user` | no | `root` | SSH user on the target |
 | `--secrets-file` | no | `secrets.yaml` | File, relative to `--secrets-repo`, to run `sops updatekeys` on |
-| `--secrets-input` | no | (unset) | Name of a flake input in the current flake pointing at the secrets repo; if set, runs `nix flake update <name>` after bootstrapping. Skip this if the input is a local path (nothing to update) |
+| `--secrets-input` | no | (unset) | Name of a flake input in the current flake pointing at the secrets repo; if set, runs `nix flake update <name>` after bootstrapping so its `flake.lock` entry picks up the newly-staged content. Applies to `path:` inputs too - they're still pinned in `flake.lock`, not read live. Skip only if the secrets repo isn't a flake input of the current flake at all |
 | `--hardware-config` | no | `./systems/<system>/<hostname>/hardware.nix` | Where nixos-anywhere writes the generated hardware config |
 | `--system` | no | `x86_64-linux` | Used only to compute the default `--hardware-config` path |
 | `--no-reboot` | no | off | Skip the reboot phase (`--phases kexec,disko,install`) |

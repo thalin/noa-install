@@ -128,11 +128,10 @@ See the main README's [Config file](./README.md#config-file) section for the ful
 
 ## Choosing `--secrets-input`
 
-If your secrets repo is consumed by your host-config flake as a git/GitHub flake input (not a local
-`path:` input), pass `--secrets-input <name>` so `noa-install` runs `nix flake update <name>` after
-bootstrapping - otherwise your flake's lock file still points at the pre-bootstrap commit when
-`nixos-anywhere` evaluates `.#<hostname>`, and the freshly-added age key/re-encrypted secrets won't
-be visible yet:
+If your secrets repo is consumed by your host-config flake as a flake input under any name, pass
+`--secrets-input <name>` so `noa-install` runs `nix flake update <name>` after bootstrapping -
+otherwise your flake's lock file still points at the pre-bootstrap snapshot when `nixos-anywhere`
+evaluates `.#<hostname>`, and the freshly-added age key/re-encrypted secrets won't be visible yet:
 
 ```console
 nix run github:thalin/noa-install#noa-install -- \
@@ -140,8 +139,12 @@ nix run github:thalin/noa-install#noa-install -- \
   --secrets-input nix-secrets
 ```
 
-If it's a local `path:` input (or not a flake input of your host-config flake at all), omit
-`--secrets-input` - there's nothing to update, since path inputs are read live.
+**This applies to `path:` inputs too, not just git/GitHub ones.** `path:` inputs still get a
+`narHash`/`lastModified` entry locked into `flake.lock` - they are not read live on every
+evaluation, despite that being an easy assumption to make since their content can drift without a
+pinned revision the way a git input's would. Skip `--secrets-input` only if the secrets repo isn't a
+flake input of your host-config flake at all (e.g. you pass `-s` pointing somewhere your flake
+doesn't otherwise reference).
 
 ## Non-Snowfall layouts
 

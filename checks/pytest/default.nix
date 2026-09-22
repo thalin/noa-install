@@ -20,6 +20,7 @@ pkgs.runCommand "noa-install-pytest"
     pkgs.age
     pkgs.ssh-to-age
     pkgs.openssh
+    pkgs.git
   ];
 }
 ''

@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -38,6 +39,7 @@ def noa(tmp_path, sops_env, monkeypatch):
     module.NIXOS_ANYWHERE_BIN = str(nixos_anywhere_stub)
     module.NIX_BIN = str(nix_stub)
     module.SOPS_BIN = shutil.which("sops")
+    module.GIT_BIN = shutil.which("git")
     module.CREATE_SSH_HOST_KEYS_BIN = f"{sys.executable} {CREATE_SSH_HOST_KEYS}"
     module.UPSERT_SOPS_AGE_KEY_BIN = f"{sys.executable} {UPSERT_SOPS_AGE_KEY}"
 
@@ -296,6 +298,83 @@ def test_full_run_bootstraps_keys_and_calls_nixos_anywhere(noa, secrets_repo, mo
     assert "--flake .#demo-vm" in log
     assert "--target-host root@127.0.0.1" in log
     assert "--generate-hardware-config nixos-generate-config ./systems/x86_64-linux/demo-vm/hardware.nix" in log
+
+
+def test_git_repo_secrets_get_staged_for_nix_path_input(noa, secrets_repo, monkeypatch, host_flake_dir):
+    # A flake `path:` input pointing at a directory that's itself a git repo
+    # only sees what's staged in the git index - noa-install has to `git add`
+    # everything create-ssh-host-keys/upsert-sops-age-key/sops updatekeys
+    # write or re-encrypt, or the very next flake evaluation (nixos-anywhere
+    # building `.#<hostname>`) still sees the pre-update secrets and fails to
+    # decrypt for the new host's own age key.
+    subprocess.run(["git", "init", "-q"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=secrets_repo, check=True)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+
+    assert "systems/demo-vm/sshkeys/ed25519.yaml" in staged
+    assert "systems/demo-vm/sshkeys/rsa.yaml" in staged
+    assert ".sops.yaml" in staged
+    assert "secrets.yaml" in staged
+
+
+def test_rerun_stages_files_left_unstaged_by_an_earlier_interrupted_run(noa, secrets_repo, monkeypatch, host_flake_dir):
+    # Reproduces the real-world failure: a first run wrote the sshkeys and
+    # re-encrypted secrets.yaml/.sops.yaml but was interrupted before they
+    # got staged (e.g. nixos-anywhere failed partway through). On the next
+    # invocation, ensure_ssh_keys sees the keys already exist and skips both
+    # key generation *and* update_sops_config entirely - so staging can't
+    # live only inside those two functions, it has to happen unconditionally
+    # in main() every run.
+    subprocess.run(["git", "init", "-q"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=secrets_repo, check=True)
+
+    # Reproduce what an interrupted first run leaves behind: keys and sops
+    # config written straight to disk, nothing staged - bypassing noa-install
+    # entirely so its (correct, post-fix) staging never gets a chance to run.
+    subprocess.run(
+        [sys.executable, str(CREATE_SSH_HOST_KEYS), "demo-vm"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        [sys.executable, str(UPSERT_SOPS_AGE_KEY), "demo-vm", "--target", "secrets.yaml"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["sops", "updatekeys", "--yes", "secrets.yaml"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    )
+
+    dirty_before = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    ).stdout
+    assert "systems/demo-vm/sshkeys/ed25519.yaml" in dirty_before
+    assert ".sops.yaml" in dirty_before
+    assert "secrets.yaml" in dirty_before
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+
+    assert "systems/demo-vm/sshkeys/ed25519.yaml" in staged
+    assert "systems/demo-vm/sshkeys/rsa.yaml" in staged
+    assert ".sops.yaml" in staged
+    assert "secrets.yaml" in staged
 
 
 def test_ssh_port_and_identity_file_passthrough(noa, secrets_repo, monkeypatch, host_flake_dir, tmp_path):
