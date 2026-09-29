@@ -140,8 +140,9 @@ def parse_args():
              "points at --secrets-repo. If set, 'nix flake update <name>' runs "
              "after bootstrapping so a freshly re-encrypted secrets file is "
              "picked up before nixos-anywhere evaluates the target config. "
-             "Only useful when that input is a non-path (e.g. git) reference; "
-             "omit if it's a local path input or you'll update it yourself."
+             "Applies to path: inputs too - they're still pinned in "
+             "flake.lock, not read live. Skip only if the secrets repo isn't "
+             "a flake input of the current flake at all."
     )
     parser.add_argument(
         "--hardware-config",
