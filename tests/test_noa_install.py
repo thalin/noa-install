@@ -326,6 +326,35 @@ def test_git_repo_secrets_get_staged_for_nix_path_input(noa, secrets_repo, monke
     assert "secrets.yaml" in staged
 
 
+def test_git_repo_secrets_get_staged_with_relative_secrets_repo_path(noa, secrets_repo, monkeypatch, host_flake_dir):
+    # Regression test: git_add() used to join repo_path onto each path (e.g.
+    # `secrets_repo_path / "systems" / ...`) and then pass that already-
+    # prefixed path to `git -C repo_path add`. With an absolute --secrets-repo
+    # that's harmless, but with a relative one - exactly what a sibling-repo
+    # setup and this project's own docs (`../nix-secrets`) recommend - the
+    # prefix gets applied twice and git refuses the doubled-up `..` as
+    # "outside repository". secrets_repo and host_flake_dir are both direct
+    # children of tmp_path here, so `../secrets-repo` reproduces that shape.
+    subprocess.run(["git", "init", "-q"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=secrets_repo, check=True)
+
+    relative_secrets_repo = f"../{secrets_repo.name}"
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", relative_secrets_repo], monkeypatch, host_flake_dir)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+
+    assert "systems/demo-vm/sshkeys/ed25519.yaml" in staged
+    assert "systems/demo-vm/sshkeys/rsa.yaml" in staged
+    assert ".sops.yaml" in staged
+    assert "secrets.yaml" in staged
+
+
 def test_rerun_stages_files_left_unstaged_by_an_earlier_interrupted_run(noa, secrets_repo, monkeypatch, host_flake_dir):
     # Reproduces the real-world failure: a first run wrote the sshkeys and
     # re-encrypted secrets.yaml/.sops.yaml but was interrupted before they

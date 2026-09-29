@@ -268,10 +268,23 @@ def git_add(repo_path, paths):
     """
     if not (repo_path / ".git").exists():
         return
-    existing = [str(p) for p in paths if Path(p).exists()]
+    # `-C repo_path` makes git resolve pathspecs relative to repo_path, not
+    # the process cwd - so a path already prefixed with repo_path (as every
+    # caller here constructs, e.g. `secrets_repo_path / "systems" / ...`)
+    # gets that prefix applied twice. With a relative --secrets-repo (e.g.
+    # `../nix-secrets`, exactly what the docs recommend for a sibling repo)
+    # the doubled-up `..` walks above repo_path's worktree root and git
+    # refuses the pathspec as "outside repository". Resolve everything to
+    # absolute paths first, then re-derive each one relative to repo_path
+    # so it's unambiguous regardless of how --secrets-repo was spelled.
+    resolved_repo = repo_path.resolve()
+    existing = [
+        str(Path(p).resolve().relative_to(resolved_repo))
+        for p in paths if Path(p).exists()
+    ]
     if not existing:
         return
-    run_command([GIT_BIN, "-C", str(repo_path), "add", "--"] + existing)
+    run_command([GIT_BIN, "-C", str(resolved_repo), "add", "--"] + existing)
 
 
 def ensure_ssh_keys(hostname, secrets_repo_path, ed25519_key_path, rsa_key_path):
