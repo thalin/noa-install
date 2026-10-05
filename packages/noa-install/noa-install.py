@@ -54,7 +54,10 @@ def run_command(command, input_data=None):
     print(f"--- Running command: {command}", flush=True)
 
     # Use block=False to allow streaming if needed, though we primarily use it for simplicity here.
-    c = delegator.run(command, block=False)
+    # timeout=None: delegator's default (30s) applies per line of output, so any
+    # step that goes quiet for longer (e.g. disko's blkdiscard of a whole drive)
+    # would raise pexpect.TIMEOUT and abort the install midway.
+    c = delegator.run(command, block=False, timeout=None)
 
     if input_data:
         c.send(input_data)
