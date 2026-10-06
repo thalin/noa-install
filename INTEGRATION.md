@@ -163,9 +163,10 @@ If your flake doesn't use Snowfall's `systems/<arch>/<hostname>/` convention:
 
 `noa-install` is safe to re-run against the same host. If
 `<secrets-repo>/systems/<hostname>/sshkeys/{ed25519,rsa}.yaml` already exist, it skips straight to
-staging the existing keys and running `nixos-anywhere` again - it won't regenerate keys, touch
-`.sops.yaml`, or re-run `sops updatekeys`. This makes it reasonable to use for reinstalls, not just
-first-time provisioning.
+staging the existing keys and running `nixos-anywhere` again - it won't regenerate keys or touch
+`.sops.yaml`. It does still run `sync-sops-recipients` every time, so any secrets file whose rule
+includes the host but that was added or re-encrypted without it since the last run gets fixed on
+the re-run. This makes it reasonable to use for reinstalls, not just first-time provisioning.
 
 ## Troubleshooting
 
@@ -176,6 +177,11 @@ first-time provisioning.
   `secrets.yaml`) doesn't match any `path_regex` in `.sops.yaml`. Either add a matching rule, or pass
   `--secrets-file` pointing at whichever file's rule you want the new host referenced in - see the
   main README's flag table for `--secrets-file`/`--secrets-input`.
+- **The installed host can't decrypt a secret** (sops-nix `failed to decrypt` at activation) -
+  check the file is covered by a creation rule that includes the host's key; remember the first
+  matching rule wins, so a broader rule listed earlier can shadow the one you meant.
+  `sync-sops-recipients --host <hostname> --dry-run` from the secrets repo lists the files the host
+  should be able to read but can't yet; noa-install re-encrypts exactly those.
 - **nixos-anywhere can't reach the target** - `-P/--ssh-port` and `-I/--identity-file` exist for
   targets on a non-standard port or requiring a specific key (see the [demo](./examples/README.md)
   for a concrete example using both against a local VM).

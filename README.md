@@ -20,7 +20,10 @@ Given a hostname, an IP, and a path to a sops secrets repo, `noa-install`:
 3. Runs `upsert-sops-age-key` to derive an age key from the new ed25519 host key and add/update it
    under `keys:` in the secrets repo's `.sops.yaml`, then ensures it's referenced in the `age:` group(s)
    of every `creation_rules:` entry whose `path_regex` matches `--secrets-file` (default `secrets.yaml`).
-4. Runs `sops updatekeys` on the secrets file so it's re-encrypted for the new key.
+4. On every run, runs `sync-sops-recipients --host <hostname>`: it finds every sops file in the
+   repo whose creation rule includes the host's key but which isn't encrypted to it yet, and runs
+   `sops updatekeys` on each. It works from the files' plaintext recipient lists, so nothing is
+   decrypted to find them. The re-encrypted files are staged with `git add`.
 5. Optionally runs `nix flake update <name>` in the current directory, in case the secrets repo is
    consumed as a flake input that needs to pick up the change (see `--secrets-input` below - this
    applies even if that input is a local `path:` one).
@@ -43,8 +46,9 @@ working directory, not an argument):
 - A `.sops.yaml` with a top-level `keys:` list of `&anchor age1...` entries and a `creation_rules:`
   list containing at least one matching entry with an `age:` recipient list (inline or via an alias
   into a `keygroups:` block) — `upsert-sops-age-key` edits this file in place.
-- A secrets file to re-encrypt (default `secrets.yaml` at the repo root; override with
-  `--secrets-file` if yours lives elsewhere, e.g. `users/foo/secrets.yaml`).
+- A secrets file whose creation rule the new host's key gets added to (default `secrets.yaml` at
+  the repo root; override with `--secrets-file` if yours lives elsewhere, e.g.
+  `users/foo/secrets.yaml`). Every other file whose rule then includes the key is re-encrypted too.
 - `systems/<hostname>/sshkeys/` need not exist yet; it's created on first run.
 
 Both `create-ssh-host-keys` and `upsert-sops-age-key` are vendored here as their own flake packages
@@ -76,7 +80,7 @@ it must be passed on the command line specifically.
 | `-i, --ip` | yes* | | Target IP address |
 | `-s, --secrets-repo` | yes* | | Path to the sops secrets repo |
 | `-u, --user` | no | `root` | SSH user on the target |
-| `--secrets-file` | no | `secrets.yaml` | File, relative to `--secrets-repo`, to run `sops updatekeys` on |
+| `--secrets-file` | no | `secrets.yaml` | File, relative to `--secrets-repo`, whose creation rule a new host's age key gets added to. Re-encryption isn't limited to it: every file whose rule includes the key is updated |
 | `--secrets-input` | no | (unset) | Name of a flake input in the current flake pointing at the secrets repo; if set, runs `nix flake update <name>` after bootstrapping so its `flake.lock` entry picks up the newly-staged content. Applies to `path:` inputs too - they're still pinned in `flake.lock`, not read live. Skip only if the secrets repo isn't a flake input of the current flake at all |
 | `--hardware-config` | no | `./systems/<system>/<hostname>/hardware.nix` | Where nixos-anywhere writes the generated hardware config |
 | `--system` | no | `x86_64-linux` | Used only to compute the default `--hardware-config` path |
@@ -138,4 +142,5 @@ nix build --impure .#nixosConfigurations.noa.config.system.build.isoImage
 - `noa-install` — the script described above.
 - `create-ssh-host-keys` — generates ed25519+rsa SSH host keys for a hostname and stores them sops-encrypted at `systems/<hostname>/sshkeys/{ed25519,rsa}.yaml` (skips existing keys unless `--overwrite`).
 - `upsert-sops-age-key` — adds/updates a host's `&anchor age1...` entry in `.sops.yaml` (deriving it from the host's ed25519 SSH key if not passed explicitly) and references it from the `age:` group(s) of every `creation_rules` entry matching `--target` (repeatable, default `secrets.yaml`). Edits the file with [ruamel.yaml](https://yaml.readthedocs.io/) so existing anchors/aliases, comments, and other entries survive round-tripping intact.
+- `sync-sops-recipients` — finds sops files whose encryption doesn't match the recipients their `.sops.yaml` creation rule (first match wins) currently lists, by comparing plaintext metadata only, and runs `sops updatekeys` on them. `--host <name>` limits it to files the host's key should be able to read but can't; `--file` checks a single file; `--dry-run` only lists them.
 - `sops-utils` — small Python library shared by the above (sops file helpers, command runner).
