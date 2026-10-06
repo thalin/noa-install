@@ -13,6 +13,7 @@ PACKAGES = REPO_ROOT / "packages"
 SOPS_UTILS_DIR = PACKAGES / "sops-utils"
 CREATE_SSH_HOST_KEYS = PACKAGES / "create-ssh-host-keys" / "create_ssh_host_keys.py"
 UPSERT_SOPS_AGE_KEY = PACKAGES / "upsert-sops-age-key" / "upsert_sops_age_key.py"
+SYNC_SOPS_RECIPIENTS = PACKAGES / "sync-sops-recipients" / "sync_sops_recipients.py"
 NOA_INSTALL = PACKAGES / "noa-install" / "noa-install.py"
 
 DEFAULT_SOPS_YAML = """\

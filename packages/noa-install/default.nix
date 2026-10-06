@@ -17,7 +17,7 @@ let
   # Manually substitute the placeholders using a standard library function.
   # This is more robust than relying on higher-level helpers that may change.
   substitutedContent = pkgs.lib.strings.replaceStrings
-    [ "@nix@" "@nixos_anywhere@" "@sops@" "@git@" "@create_ssh_host_keys@" "@upsert_sops_age_key@" ]
+    [ "@nix@" "@nixos_anywhere@" "@sops@" "@git@" "@create_ssh_host_keys@" "@upsert_sops_age_key@" "@sync_sops_recipients@" ]
     [
       "${pkgs.nix}/bin/nix"
       "${pkgs.nixos-anywhere}/bin/nixos-anywhere"
@@ -25,6 +25,7 @@ let
       "${pkgs.git}/bin/git"
       "${pkgs.${namespace}.create-ssh-host-keys}/bin/create-ssh-host-keys"
       "${pkgs.${namespace}.upsert-sops-age-key}/bin/upsert-sops-age-key"
+      "${pkgs.${namespace}.sync-sops-recipients}/bin/sync-sops-recipients"
     ]
     scriptContent;
 

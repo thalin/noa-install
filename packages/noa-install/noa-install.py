@@ -13,6 +13,8 @@
 # line - see load_layered_config() for the precedence order.
 #
 import argparse
+import shlex
+import subprocess
 import tempfile
 import os
 import sys
@@ -45,6 +47,7 @@ SOPS_BIN = "@sops@"
 GIT_BIN = "@git@"
 CREATE_SSH_HOST_KEYS_BIN = "@create_ssh_host_keys@"
 UPSERT_SOPS_AGE_KEY_BIN = "@upsert_sops_age_key@"
+SYNC_SOPS_RECIPIENTS_BIN = "@sync_sops_recipients@"
 
 def run_command(command, input_data=None):
     """Helper function to run a command using delegator."""
@@ -132,9 +135,10 @@ def parse_args():
     parser.add_argument(
         "--secrets-file",
         default=None,
-        help="Path, relative to --secrets-repo, of the file to run "
-             "'sops updatekeys' against after adding a new age key "
-             "(default: 'secrets.yaml')"
+        help="Path, relative to --secrets-repo, of the file whose creation "
+             "rule a new host's age key gets added to (default: "
+             "'secrets.yaml'). Every file whose rule then includes the key "
+             "is re-encrypted, not just this one"
     )
     parser.add_argument(
         "--secrets-input",
@@ -306,12 +310,38 @@ def ensure_ssh_keys(hostname, secrets_repo_path, ed25519_key_path, rsa_key_path)
 
 
 def update_sops_config(hostname, secrets_repo_path, secrets_file):
-    """Adds the new host's age key to .sops.yaml and reencrypts secrets."""
+    """Adds the new host's age key to .sops.yaml. Re-encrypting is left to
+    sync_host_secrets(), which covers every file the key grants access to,
+    not just this one."""
     with chdir(secrets_repo_path):
         print("--- Adding new host age key to SOPS configuration ---", flush=True)
         run_command([UPSERT_SOPS_AGE_KEY_BIN, hostname, "--target", secrets_file])
-        print(f"--- Reencrypting {secrets_file} for new age keys ---", flush=True)
-        run_command([SOPS_BIN, "updatekeys", "--yes", secrets_file])
+
+
+def sync_host_secrets(hostname, secrets_repo_path):
+    """Re-encrypts every secrets file whose creation rule includes the host's
+    age key but whose recipients don't match it yet. Returns the paths,
+    relative to the repo, of every file the rules give the host - re-encrypted
+    now or already in sync - so the caller stages ones an interrupted earlier
+    run re-encrypted too.
+
+    Runs every time, not just when the keys were first generated: a host
+    usually needs more than one file (per-host and per-service secrets, not
+    only secrets.yaml), and an earlier run may have been interrupted, or the
+    host's key rotated, after .sops.yaml was updated but before everything
+    was re-encrypted - which leaves the host unable to decrypt its secrets on
+    first boot."""
+    print("--- Re-encrypting secrets files for the host's age key ---", flush=True)
+    # Not run_command(): its output stream merges stdout and stderr, and the
+    # paths come back on stdout alone.
+    result = subprocess.run(
+        [*shlex.split(SYNC_SOPS_RECIPIENTS_BIN), "--host", hostname, "--print-all"],
+        cwd=secrets_repo_path, stdout=subprocess.PIPE, text=True,
+    )
+    if result.returncode != 0:
+        print(f"Command failed with exit code {result.returncode}", file=sys.stderr, flush=True)
+        sys.exit(1)
+    return [line for line in result.stdout.splitlines() if line]
 
 
 def update_secrets_input(secrets_input):
@@ -396,6 +426,8 @@ def main():
     if not keys_existed:
         update_sops_config(settings["hostname"], secrets_repo_path, settings["secrets_file"])
 
+    synced = sync_host_secrets(settings["hostname"], secrets_repo_path)
+
     # Stage whatever's current in the secrets repo unconditionally - not just
     # when *this* run wrote it. If an earlier run wrote these files but was
     # interrupted before reaching this point (e.g. it crashed partway through
@@ -405,6 +437,7 @@ def main():
     # them. No-op if everything's already staged/committed or unchanged.
     git_add(secrets_repo_path, [ed25519_key_path, rsa_key_path])
     git_add(secrets_repo_path, [secrets_repo_path / ".sops.yaml", secrets_repo_path / settings["secrets_file"]])
+    git_add(secrets_repo_path, [secrets_repo_path / p for p in synced])
 
     if settings["secrets_input"]:
         update_secrets_input(settings["secrets_input"])

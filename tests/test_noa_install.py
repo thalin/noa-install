@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from conftest import CREATE_SSH_HOST_KEYS, UPSERT_SOPS_AGE_KEY, load_noa_install_module
+from conftest import CREATE_SSH_HOST_KEYS, SYNC_SOPS_RECIPIENTS, UPSERT_SOPS_AGE_KEY, load_noa_install_module
 
 
 BASH = shutil.which("bash")
@@ -24,7 +24,7 @@ def make_stub(path, log_path, exit_code=0):
 @pytest.fixture
 def noa(tmp_path, sops_env, monkeypatch):
     """A noa-install module wired to the *real* create-ssh-host-keys,
-    upsert-sops-age-key, and sops (so the sops-side bootstrap is exercised
+    upsert-sops-age-key, sync-sops-recipients, and sops (so the sops-side bootstrap is exercised
     for real), with nixos-anywhere and nix replaced by recording stubs so no
     actual provisioning or flake update happens."""
     module = load_noa_install_module()
@@ -42,6 +42,7 @@ def noa(tmp_path, sops_env, monkeypatch):
     module.GIT_BIN = shutil.which("git")
     module.CREATE_SSH_HOST_KEYS_BIN = f"{sys.executable} {CREATE_SSH_HOST_KEYS}"
     module.UPSERT_SOPS_AGE_KEY_BIN = f"{sys.executable} {UPSERT_SOPS_AGE_KEY}"
+    module.SYNC_SOPS_RECIPIENTS_BIN = f"{sys.executable} {SYNC_SOPS_RECIPIENTS}"
 
     for key, value in sops_env.items():
         monkeypatch.setenv(key, value)
@@ -511,3 +512,58 @@ def test_staged_extra_files_contain_the_bootstrapped_ssh_keys(noa, secrets_repo,
     assert "etc/ssh/ssh_host_ed25519_key.pub" in contents
     assert "etc/ssh/ssh_host_rsa_key" in contents
     assert "etc/ssh/ssh_host_rsa_key.pub" in contents
+
+
+def add_service_secret(secrets_repo, sops_env):
+    """Adds a second file the host should be able to read - beyond the one
+    --secrets-file points at - encrypted before the host existed."""
+    sops_yaml = secrets_repo / ".sops.yaml"
+    sops_yaml.write_text(sops_yaml.read_text() + "  - path_regex: services/demo\\.yaml\n    age: *all\n")
+    (secrets_repo / "services").mkdir()
+    (secrets_repo / "services" / "demo.yaml").write_text("token: abc\n")
+    subprocess.run(["sops", "encrypt", "-i", "services/demo.yaml"],
+                   cwd=secrets_repo, env=sops_env, check=True, capture_output=True, text=True)
+
+
+def host_age_key(secrets_repo):
+    data = yaml.safe_load((secrets_repo / ".sops.yaml").read_text())
+    return data["keys"][-1]
+
+
+def test_full_run_reencrypts_every_file_the_host_needs(noa, secrets_repo, sops_env, monkeypatch, host_flake_dir):
+    add_service_secret(secrets_repo, sops_env)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+
+    key = host_age_key(secrets_repo)
+    assert key in (secrets_repo / "secrets.yaml").read_text()
+    assert key in (secrets_repo / "services" / "demo.yaml").read_text()
+
+
+def test_rerun_reencrypts_files_a_previous_run_missed(noa, secrets_repo, sops_env, monkeypatch, host_flake_dir):
+    # The real-world failure: keys already exist from an earlier run, so the
+    # bootstrap is skipped - but some file the host needs was never
+    # re-encrypted for it.
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+    add_service_secret(secrets_repo, sops_env)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+
+    assert host_age_key(secrets_repo) in (secrets_repo / "services" / "demo.yaml").read_text()
+
+
+def test_reencrypted_files_get_staged(noa, secrets_repo, sops_env, monkeypatch, host_flake_dir):
+    add_service_secret(secrets_repo, sops_env)
+    subprocess.run(["git", "init", "-q"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=secrets_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=secrets_repo, check=True)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(secrets_repo)], monkeypatch, host_flake_dir)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=secrets_repo, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert "services/demo.yaml" in staged
