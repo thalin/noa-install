@@ -180,8 +180,9 @@ the re-run. This makes it reasonable to use for reinstalls, not just first-time 
 - **The installed host can't decrypt a secret** (sops-nix `failed to decrypt` at activation) -
   check the file is covered by a creation rule that includes the host's key; remember the first
   matching rule wins, so a broader rule listed earlier can shadow the one you meant.
-  `sync-sops-recipients --host <hostname> --dry-run` from the secrets repo lists the files the host
-  should be able to read but can't yet; noa-install re-encrypts exactly those.
+  `sync-sops-recipients --host <hostname> --dry-run` from the secrets repo lists the files under the
+  host's rules whose recipients are out of date (e.g. missing the host's key); noa-install
+  re-encrypts exactly those.
 - **nixos-anywhere can't reach the target** - `-P/--ssh-port` and `-I/--identity-file` exist for
   targets on a non-standard port or requiring a specific key (see the [demo](./examples/README.md)
   for a concrete example using both against a local VM).
