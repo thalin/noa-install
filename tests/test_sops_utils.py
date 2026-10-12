@@ -49,9 +49,23 @@ def test_ensure_sops_file_rejects_invalid_existing_file(secrets_repo, sops_env):
     assert "valid sops file" in result.stderr
 
 
+def test_ensure_sops_file_fails_and_cleans_up_when_encryption_fails(secrets_repo, sops_env):
+    # matches none of the fixture .sops.yaml's creation_rules, so `sops
+    # encrypt` has no recipients and fails
+    target = secrets_repo / "unmatched" / "new.yaml"
+
+    code = f"import sops_utils; sops_utils.ensure_sops_file({str(target)!r})"
+    result = run_snippet(code, cwd=secrets_repo, env=sops_env)
+
+    assert result.returncode == 1
+    assert "Failed to encrypt" in result.stderr
+    # the plaintext seed must not be left behind
+    assert not target.exists()
+
+
 def test_sopsfile_set_writes_nested_dotted_keys(secrets_repo, sops_env):
     # must match one of the fixture .sops.yaml's creation_rules or `sops
-    # encrypt` has no recipients to encrypt to and silently no-ops
+    # encrypt` has no recipients to encrypt to and ensure_sops_file fails
     target = secrets_repo / "systems" / "testhost" / "sshkeys" / "nested.yaml"
     code = f"import sops_utils; sops_utils.SopsFile({str(target)!r}).set('a.b.c', 'hello')"
 
@@ -66,7 +80,7 @@ def test_sopsfile_set_writes_nested_dotted_keys(secrets_repo, sops_env):
 
 def test_sopsfile_set_twice_merges_rather_than_overwrites(secrets_repo, sops_env):
     # must match one of the fixture .sops.yaml's creation_rules or `sops
-    # encrypt` has no recipients to encrypt to and silently no-ops
+    # encrypt` has no recipients to encrypt to and ensure_sops_file fails
     target = secrets_repo / "systems" / "testhost" / "sshkeys" / "nested.yaml"
     run_snippet(f"import sops_utils; sops_utils.SopsFile({str(target)!r}).set('a.b', 'one')",
                 cwd=secrets_repo, env=sops_env)

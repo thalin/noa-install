@@ -27,7 +27,13 @@ def ensure_sops_file(sops_file):
             os.makedirs(dirname, exist_ok=True)
         with open(sops_file, 'w') as f:
             json.dump({"created": datetime.now(timezone.utc).isoformat()}, f)
-        run_command(f"sops encrypt -i {sops_file}")
+        c = run_command(f"sops encrypt -i {sops_file}")
+        if c.return_code != 0:
+            # Don't leave the unencrypted seed behind: a later run would
+            # treat it as an existing (invalid) sops file.
+            os.remove(sops_file)
+            print(f"Error: Failed to encrypt new sops file {sops_file}. Does a .sops.yaml creation_rule match it?", file=sys.stderr)
+            sys.exit(1)
     else:
         print(f"Verifying existing sops file: {sops_file}")
         c = run_command(f"sops decrypt {sops_file}")
