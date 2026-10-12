@@ -567,3 +567,69 @@ def test_reencrypted_files_get_staged(noa, secrets_repo, sops_env, monkeypatch, 
         cwd=secrets_repo, check=True, capture_output=True, text=True,
     ).stdout.splitlines()
     assert "services/demo.yaml" in staged
+
+
+# --- secrets repos using sops-compose (sops/rules.yaml)
+
+def compose_host_key(repo, host="demo-vm"):
+    return yaml.safe_load((repo / "sops" / "keys" / "hosts.yaml").read_text())[host]
+
+
+def git_commit_all(repo):
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=repo, check=True)
+
+
+def test_sops_compose_full_run_adds_host_to_sources(noa, compose_repo, monkeypatch, host_flake_dir):
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(compose_repo)], monkeypatch, host_flake_dir)
+
+    key = compose_host_key(compose_repo)
+    assert key.startswith("age1")
+    assert key in (compose_repo / ".sops.yaml").read_text()
+    # sync-sops-recipients re-encrypted secrets.yaml for the new host.
+    assert key in (compose_repo / "secrets.yaml").read_text()
+    assert "--flake .#demo-vm" in noa.nixos_anywhere_log.read_text()
+
+
+def test_sops_compose_sources_get_staged(noa, compose_repo, monkeypatch, host_flake_dir):
+    git_commit_all(compose_repo)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(compose_repo)], monkeypatch, host_flake_dir)
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=compose_repo, check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    assert "sops/keys/hosts.yaml" in staged
+    assert ".sops.yaml" in staged
+    assert "secrets.yaml" in staged
+
+
+def test_sops_compose_rerun_repairs_a_missing_host_key(noa, compose_repo, monkeypatch, host_flake_dir):
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(compose_repo)], monkeypatch, host_flake_dir)
+    key = compose_host_key(compose_repo)
+
+    # Someone drops the host from the sources; the SSH keys still exist, so
+    # a hand-kept .sops.yaml would be skipped - sops-compose upserts anyway.
+    (compose_repo / "sops" / "keys" / "hosts.yaml").write_text("# Host keys, managed by noa-install\n")
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1", "-s", str(compose_repo)], monkeypatch, host_flake_dir)
+
+    assert compose_host_key(compose_repo) == key
+
+
+def test_sops_compose_grant_with_from_config_file(noa, compose_repo, monkeypatch, host_flake_dir):
+    (host_flake_dir / ".noa-install.yaml").write_text(textwrap.dedent(f"""\
+        secrets_repo: {compose_repo}
+        secrets_file: systems/demo-vm/app.yaml
+        grant_with: admin
+    """))
+    app = compose_repo / "systems" / "demo-vm" / "app.yaml"
+    app.parent.mkdir(parents=True)
+
+    run_main(noa, ["-h", "demo-vm", "-i", "127.0.0.1"], monkeypatch, host_flake_dir)
+
+    rules = yaml.safe_load((compose_repo / "sops" / "rules.yaml").read_text())
+    assert rules[-1] == {"path_regex": r"^systems/demo-vm/app\.yaml$", "age": ["hosts.demo-vm", "admin"]}

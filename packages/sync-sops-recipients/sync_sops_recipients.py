@@ -62,6 +62,20 @@ def matching_rule(creation_rules, rel_path: str):
     return None
 
 
+def sops_compose_key(repo: Path, host: str) -> str:
+    """The age key named `host` in sops-compose sources: `hosts.<host>` for a
+    bare name, or any dotted key name (`workstations.laptop`)."""
+    parts = host.split(".") if "." in host else ["hosts", host]
+    file = repo / "sops" / "keys" / f"{parts[0]}.yaml"
+    node = YAML(typ="safe").load(file) if file.exists() else None
+    for part in parts[1:]:
+        node = node.get(part) if isinstance(node, dict) else None
+    if not isinstance(node, str):
+        print(f"Error: no key named '{'.'.join(parts)}' in {file.relative_to(repo)}.", file=sys.stderr)
+        sys.exit(1)
+    return node.strip()
+
+
 def host_key(data, host: str) -> str:
     """The age key anchored as `&host` under `keys:`."""
     for item in data.get("keys") or []:
@@ -108,7 +122,8 @@ def main():
         description="Run 'sops updatekeys' on every file whose age recipients don't "
                     "match .sops.yaml. Run from the root of the secrets repo.")
     parser.add_argument("--host", help="Only files whose creation rule includes this host's "
-                        "key (the '&host' anchor under 'keys:')")
+                        "key: the '&host' anchor under 'keys:', or with sops-compose sources "
+                        "(sops/rules.yaml) the key hosts.<host> (or a dotted key name)")
     parser.add_argument("--file", default=".sops.yaml",
                         help="The SOPS configuration file (default: .sops.yaml)")
     parser.add_argument("--dry-run", action="store_true",
@@ -125,8 +140,11 @@ def main():
 
     only_key = None
     if args.host:
-        with open(config) as f:
-            only_key = host_key(YAML().load(f), args.host)
+        if (repo / "sops" / "rules.yaml").is_file():
+            only_key = sops_compose_key(repo, args.host)
+        else:
+            with open(config) as f:
+                only_key = host_key(YAML().load(f), args.host)
 
     files = list(find_files(repo, config, only_key))
     stale = [f for f in files if f[1] or f[2]]

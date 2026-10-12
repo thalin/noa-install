@@ -1,0 +1,4 @@
+# The demo operator's age identity. admin-key.txt (generated with
+# `age-keygen`) is DEMO-ONLY and gitignored - never commit real private keys
+# like this to a real secrets repo. See examples/README.md step 2.
+admin: age18m2wtpwyk39hh99td2n396gurcm935c3hzyytg6f062wsnkdsa7qq4cfex

@@ -93,7 +93,8 @@
       "inputs": {
         "disko": "disko",
         "nixpkgs": "nixpkgs",
-        "snowfall-lib": "snowfall-lib"
+        "snowfall-lib": "snowfall-lib",
+        "sops-compose": "sops-compose"
       }
     },
     "snowfall-lib": {
@@ -115,6 +116,26 @@
       "original": {
         "owner": "snowfallorg",
         "repo": "lib",
+        "type": "github"
+      }
+    },
+    "sops-compose": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1791815482,
+        "narHash": "sha256-APb7d4NblMS4Pf2XgDhc89YGqqA4pw8GJ49iJX56+3M=",
+        "owner": "thalin",
+        "repo": "sops-compose",
+        "rev": "bd2579abfdd4d093ad18f04c9d93100d3288d673",
+        "type": "github"
+      },
+      "original": {
+        "owner": "thalin",
+        "repo": "sops-compose",
         "type": "github"
       }
     },

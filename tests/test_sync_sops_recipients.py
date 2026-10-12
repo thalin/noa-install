@@ -154,3 +154,24 @@ def test_fails_when_updatekeys_fails(tmp_path, age_identity, second_age_identity
     assert result.returncode == 1
     assert "failed for: systems/demo-vm/app.yaml" in result.stderr
     assert result.stdout.splitlines() == ["secrets.yaml"]
+
+
+def test_host_key_comes_from_sops_compose_sources(compose_repo, second_age_identity, sops_env):
+    host = second_age_identity["public_key"]
+    keys = compose_repo / "sops" / "keys"
+    (keys / "hosts.yaml").write_text(f"demo-vm: {host}\n")
+    subprocess.run(["sops-compose", "render"], cwd=compose_repo, env=sops_env, check=True,
+                   capture_output=True, text=True)
+    # secrets.yaml (rule: all) was encrypted before the host key existed.
+    assert host not in (compose_repo / "secrets.yaml").read_text()
+
+    result = run_py(SYNC_SOPS_RECIPIENTS, ["--host", "demo-vm"], cwd=compose_repo, env=sops_env)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["secrets.yaml"]
+    assert host in (compose_repo / "secrets.yaml").read_text()
+
+
+def test_sops_compose_host_errors_when_not_in_sources(compose_repo, sops_env):
+    result = run_py(SYNC_SOPS_RECIPIENTS, ["--host", "nope"], cwd=compose_repo, env=sops_env)
+    assert result.returncode == 1
+    assert "no key named 'hosts.nope' in sops/keys/hosts.yaml" in result.stderr

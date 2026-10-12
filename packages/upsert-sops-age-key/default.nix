@@ -1,4 +1,4 @@
-{ lib, stdenv, python3, makeWrapper, ssh-to-age, sops }:
+{ lib, stdenv, python3, makeWrapper, ssh-to-age, sops, inputs }:
 
 let
   python = python3.withPackages (ps: [
@@ -24,11 +24,12 @@ stdenv.mkDerivation rec {
       --prefix PATH : ${lib.makeBinPath [
         ssh-to-age
         sops
+        inputs.sops-compose.packages.${stdenv.hostPlatform.system}.default
       ]}
   '';
 
   meta = with lib; {
-    description = "A script to upsert a SOPS age key into .sops.yaml";
+    description = "Upsert a SOPS age key into sops-compose sources or .sops.yaml";
     license = licenses.mit; # Or appropriate license
   };
 }

@@ -186,22 +186,77 @@ def upsert_age_key(host: str, age_key: str, sops_file: str, targets: list[str]):
     print(f"SOPS file '{sops_file}' processing complete for host '{host}'.")
 
 
+def uses_sops_compose() -> bool:
+    """A secrets repo with sops-compose sources (sops/rules.yaml) gets its
+    .sops.yaml rendered from them, so keys go into the sources instead."""
+    return os.path.isfile(os.path.join("sops", "rules.yaml"))
+
+
+def run_sops_compose(args: list[str]):
+    # sops-compose is on PATH via the Nix wrapper.
+    result = subprocess.run(["sops-compose", *args])
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+def upsert_with_sops_compose(host: str, age_key: str, namespace: str, targets: list[str],
+                             with_refs: list[str], allow_broad: bool):
+    """Adds the key as `<namespace>.<host>` and grants it every target path:
+    sops-compose extends the rule each path already uses, or appends a rule
+    for it (with `with_refs` as co-recipients). Both steps re-render
+    .sops.yaml, and both are idempotent."""
+    if not age_key:
+        age_key = get_age_key_from_ssh(host)
+        if not age_key:
+            print(f"Error: No age key provided and could not derive one from SSH host keys for '{host}'.", file=sys.stderr)
+            sys.exit(1)
+        print(f"Derived age key: {age_key}")
+
+    name = f"{namespace}.{host}"
+    run_sops_compose(["add-key", name, age_key])
+    grant = ["grant", name, *targets, "--note", f"added by upsert-sops-age-key for {host}"]
+    for ref in with_refs:
+        grant += ["--with", ref]
+    if allow_broad:
+        grant.append("--allow-broad")
+    run_sops_compose(grant)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Upsert a SOPS age key into .sops.yaml")
-    parser.add_argument("host", help="The host name (anchor name)")
+    parser = argparse.ArgumentParser(
+        description="Upsert a SOPS age key: into sops-compose sources if the repo has "
+                    "sops/rules.yaml, otherwise into .sops.yaml directly")
+    parser.add_argument("host", help="The host name (anchor name, or key name under --namespace)")
     parser.add_argument("agekey", nargs="?", help="The age public key (optional, will try to derive from SSH host keys if omitted)")
-    parser.add_argument("--file", default=".sops.yaml", help="The SOPS configuration file (default: .sops.yaml)")
+    parser.add_argument("--file", default=".sops.yaml", help="The SOPS configuration file (default: .sops.yaml). Ignored with sops-compose")
     parser.add_argument(
         "--target",
         action="append",
         default=None,
-        help="Path whose creation_rules should reference this host's key, matched "
-             "against each rule's path_regex. Repeatable. Default: 'secrets.yaml'"
+        help="Path the host's key must be able to decrypt. Without sops-compose: every "
+             "creation_rule whose path_regex matches gets the key. With sops-compose: the "
+             "rule sops would use is extended, or a rule for the path is added. "
+             "Repeatable. Default: 'secrets.yaml'"
     )
+    parser.add_argument("--namespace", default="hosts",
+                        help="sops-compose key file to add the key to (default: hosts)")
+    parser.add_argument("--with", dest="with_refs", action="append", default=[], metavar="REF",
+                        help="sops-compose only: extra recipient for rules created for a "
+                             "--target (repeatable), e.g. a group of admins")
+    parser.add_argument("--allow-broad", action="store_true",
+                        help="sops-compose only: extend a target's rule even if it also "
+                             "covers other files")
 
     args = parser.parse_args()
     targets = args.target or ["secrets.yaml"]
-    upsert_age_key(args.host, args.agekey, args.file, targets)
+    if uses_sops_compose():
+        upsert_with_sops_compose(args.host, args.agekey, args.namespace, targets,
+                                 args.with_refs, args.allow_broad)
+    else:
+        if args.with_refs or args.allow_broad:
+            print("Warning: --with/--allow-broad only apply to sops-compose repos; ignoring.",
+                  file=sys.stderr)
+        upsert_age_key(args.host, args.agekey, args.file, targets)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Renders .sops.yaml from split sources; upsert-sops-age-key uses it when
+    # a secrets repo has sops/rules.yaml.
+    sops-compose = {
+      url = "github:thalin/sops-compose";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Only used by the systems/x86_64-linux/demo-vm example.
     disko = {
       url = "github:nix-community/disko";

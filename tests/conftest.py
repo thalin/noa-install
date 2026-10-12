@@ -107,6 +107,36 @@ def sops_env(age_identity):
     return env
 
 
+COMPOSE_RULES_YAML = """\
+- path_regex: ^secrets\\.yaml$
+  age: all
+- path_regex: systems/.*/sshkeys/.*\\.yaml$
+  age: admin
+"""
+
+
+@pytest.fixture
+def compose_repo(tmp_path, age_identity, sops_env):
+    """Like secrets_repo, but with .sops.yaml rendered by sops-compose from
+    sources under sops/: the admin key in users.yaml, an `admin` group, a
+    `secrets.yaml` rule using `all` and an sshkeys rule."""
+    repo = tmp_path / "secrets-repo"
+    (repo / "sops" / "keys").mkdir(parents=True)
+    (repo / "sops" / "keys" / "users.yaml").write_text(f"admin: {age_identity['public_key']} # operator\n")
+    (repo / "sops" / "keys" / "hosts.yaml").write_text("# Host keys, managed by noa-install\n")
+    (repo / "sops" / "groups.yaml").write_text("admin: [users.admin]\n")
+    (repo / "sops" / "rules.yaml").write_text(COMPOSE_RULES_YAML)
+    subprocess.run(["sops-compose", "render"], cwd=repo, env=sops_env, check=True,
+                   capture_output=True, text=True)
+
+    (repo / "secrets.yaml").write_text("example_secret: replace-me\n")
+    subprocess.run(
+        ["sops", "encrypt", "-i", "secrets.yaml"],
+        cwd=repo, env=sops_env, check=True, capture_output=True, text=True,
+    )
+    return repo
+
+
 @pytest.fixture
 def secrets_repo(tmp_path, age_identity, sops_env):
     """A minimal secrets repo: .sops.yaml plus an actual sops-encrypted

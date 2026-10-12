@@ -3,7 +3,7 @@
 # it's exercising the Python logic and its real interaction with sops/age/ssh,
 # not the packaging. Needs network-free crypto tooling only, so it's fine
 # inside the build sandbox.
-{ pkgs, ... }:
+{ pkgs, inputs, ... }:
 let
   pythonEnv = pkgs.python3.withPackages (ps: [
     ps.pytest
@@ -21,6 +21,7 @@ pkgs.runCommand "noa-install-pytest"
     pkgs.ssh-to-age
     pkgs.openssh
     pkgs.git
+    inputs.sops-compose.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 }
 ''

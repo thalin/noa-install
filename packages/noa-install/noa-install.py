@@ -27,6 +27,7 @@ import delegator
 CONFIG_FIELDS = [
     "hostname", "ip", "user", "secrets_repo", "secrets_file", "secrets_input",
     "hardware_config", "system", "no_reboot", "ssh_port", "identity_file",
+    "grant_with",
 ]
 
 # Applied only after every config layer and the CLI have had a chance to set
@@ -37,6 +38,7 @@ CONFIG_DEFAULTS = {
     "secrets_file": "secrets.yaml",
     "system": "x86_64-linux",
     "no_reboot": False,
+    "grant_with": [],
 }
 
 # These paths are meant to be substituted by Nix during the build process.
@@ -184,6 +186,16 @@ def parse_args():
              "agent/default keys"
     )
     parser.add_argument(
+        "--grant-with",
+        action="append",
+        default=None,
+        metavar="REF",
+        help="Secrets repos using sops-compose only: extra recipient (a key "
+             "name or group, e.g. your admin group) for any creation rule "
+             "created so the new host can decrypt --secrets-file. Repeatable; "
+             "set a list in a config file to avoid passing it every time"
+    )
+    parser.add_argument(
         "--config",
         default=None,
         help="Extra config file to layer on top of the XDG and cwd config "
@@ -243,6 +255,10 @@ def resolve_settings(args):
         cli_value = getattr(args, field)
         if cli_value is not None:
             settings[field] = cli_value
+
+    # A single REF in a config file is fine too.
+    if isinstance(settings["grant_with"], str):
+        settings["grant_with"] = [settings["grant_with"]]
 
     required_flags = {
         "hostname": "-h/--hostname",
@@ -309,13 +325,23 @@ def ensure_ssh_keys(hostname, secrets_repo_path, ed25519_key_path, rsa_key_path)
     return keys_existed
 
 
-def update_sops_config(hostname, secrets_repo_path, secrets_file):
-    """Adds the new host's age key to .sops.yaml. Re-encrypting is left to
+def uses_sops_compose(secrets_repo_path):
+    """Whether the secrets repo renders .sops.yaml from sops-compose sources
+    (sops/rules.yaml) rather than keeping it by hand."""
+    return (secrets_repo_path / "sops" / "rules.yaml").is_file()
+
+
+def update_sops_config(hostname, secrets_repo_path, secrets_file, grant_with=()):
+    """Adds the host's age key to the sops config: the sops-compose sources
+    (re-rendering .sops.yaml) or .sops.yaml itself. Re-encrypting is left to
     sync_host_secrets(), which covers every file the key grants access to,
     not just this one."""
     with chdir(secrets_repo_path):
-        print("--- Adding new host age key to SOPS configuration ---", flush=True)
-        run_command([UPSERT_SOPS_AGE_KEY_BIN, hostname, "--target", secrets_file])
+        print("--- Adding host age key to SOPS configuration ---", flush=True)
+        command = [UPSERT_SOPS_AGE_KEY_BIN, hostname, "--target", secrets_file]
+        for ref in grant_with:
+            command += ["--with", ref]
+        run_command(command)
 
 
 def sync_host_secrets(hostname, secrets_repo_path):
@@ -423,8 +449,13 @@ def main():
 
     keys_existed = ensure_ssh_keys(settings["hostname"], secrets_repo_path, ed25519_key_path, rsa_key_path)
 
-    if not keys_existed:
-        update_sops_config(settings["hostname"], secrets_repo_path, settings["secrets_file"])
+    # With sops-compose the upsert is idempotent, so it runs every time: a
+    # reinstall also repairs a host key missing from the sources. A
+    # hand-kept .sops.yaml is only touched when the keys were just created.
+    sops_compose = uses_sops_compose(secrets_repo_path)
+    if sops_compose or not keys_existed:
+        update_sops_config(settings["hostname"], secrets_repo_path, settings["secrets_file"],
+                           settings["grant_with"])
 
     synced = sync_host_secrets(settings["hostname"], secrets_repo_path)
 
@@ -437,6 +468,9 @@ def main():
     # them. No-op if everything's already staged/committed or unchanged.
     git_add(secrets_repo_path, [ed25519_key_path, rsa_key_path])
     git_add(secrets_repo_path, [secrets_repo_path / ".sops.yaml", secrets_repo_path / settings["secrets_file"]])
+    if sops_compose:
+        git_add(secrets_repo_path, [secrets_repo_path / "sops" / "keys" / "hosts.yaml",
+                                    secrets_repo_path / "sops" / "rules.yaml"])
     git_add(secrets_repo_path, [secrets_repo_path / p for p in synced])
 
     if settings["secrets_input"]:

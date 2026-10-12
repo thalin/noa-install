@@ -1,0 +1,2 @@
+# Host age keys. noa-install adds each host it bootstraps here (via
+# upsert-sops-age-key -> sops-compose add-key).

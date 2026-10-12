@@ -12,14 +12,51 @@ plugs into a real setup.
 1. **A host-config flake** with a `nixosConfigurations.<hostname>` output per machine. If you use
    [Snowfall-lib](https://snowfall.org), that's just `systems/<system>/<hostname>/default.nix` and you're
    already set up correctly. If not, see [Non-Snowfall layouts](#non-snowfall-layouts) below.
-2. **A sops secrets repo** with a `.sops.yaml` using the `keys:` + `creation_rules:` shape (anchors
-   under `keys:`, referenced by alias from the `age:` field of each `creation_rules:` entry — either
-   directly or via a named group under an optional `keygroups:` block) - this is the standard
-   [sops](https://github.com/getsops/sops) config format, not something specific to this tool. If
-   you don't have per-host SSH keys and age identities yet, `noa-install` will create the first one
-   for you on its first run.
+2. **A sops secrets repo**, ideally with its sops config written as
+   [sops-compose](https://github.com/thalin/sops-compose) sources: named age keys under
+   `sops/keys/`, groups in `sops/groups.yaml`, and ordered creation rules in `sops/rules.yaml`,
+   rendered to a committed `.sops.yaml`. A hand-kept `.sops.yaml` works too (see
+   [Hand-kept .sops.yaml](#hand-kept-sopsyaml) below). If you don't have per-host SSH keys and age
+   identities yet, `noa-install` will create the first one for you on its first run.
 
-If your secrets repo doesn't have a `.sops.yaml` at all yet, create a minimal one first:
+If your secrets repo has no sops config yet, start with these sops-compose sources:
+
+```yaml
+# sops/keys/users.yaml
+admin: age1...your own age public key...
+
+# sops/keys/hosts.yaml (noa-install adds hosts here)
+
+# sops/groups.yaml
+admin: [users.admin]
+
+# sops/rules.yaml
+- path_regex: ^secrets\.yaml$
+  age: all
+- path_regex: systems/.*/sshkeys/.*\.yaml$
+  age: admin
+```
+
+then run `nix run github:thalin/sops-compose -- render` to write `.sops.yaml`.
+
+- `all` is every key, so each host noa-install adds can decrypt `secrets.yaml` straight away.
+- The second rule is what lets `create-ssh-host-keys` encrypt the SSH keys it generates for new
+  hosts. Without a rule matching `systems/<hostname>/sshkeys/*.yaml`, `sops encrypt` has no
+  recipients to encrypt to and will fail.
+- If `--secrets-file` matches no rule, noa-install adds one for it, encrypted to the host plus
+  whatever you pass with `--grant-with` (e.g. `grant_with: admin` in a config file). Without that,
+  only the host could decrypt it.
+
+See [`examples/secrets-repo/`](./examples/secrets-repo) for a copy of exactly this, and the
+[sops-compose README](https://github.com/thalin/sops-compose) for the pre-commit hook that keeps
+`.sops.yaml` in sync with the sources.
+
+### Hand-kept .sops.yaml
+
+Without `sops/rules.yaml`, `upsert-sops-age-key` edits `.sops.yaml` directly. It expects the
+`keys:` + `creation_rules:` shape: anchors under `keys:`, referenced by alias from the `age:` field
+of each `creation_rules:` entry, either directly or via a named group under an optional
+`keygroups:` block. It also still supports the legacy `key_groups:` shape. A minimal one:
 
 ```yaml
 # .sops.yaml
@@ -35,12 +72,6 @@ creation_rules:
     age:
       - *admin
 ```
-
-The second rule is what lets `create-ssh-host-keys` encrypt the SSH keys it generates for new hosts -
-without a rule matching `systems/<hostname>/sshkeys/*.yaml`, `sops encrypt` has no recipients to
-encrypt to and will fail. `upsert-sops-age-key` also still supports the legacy `key_groups:` shape if
-that's what your existing repo already uses. See
-[`examples/secrets-repo/.sops.yaml`](./examples/secrets-repo/.sops.yaml) for a copy of exactly this.
 
 ## 1. Run it directly (no flake changes needed)
 
@@ -163,8 +194,9 @@ If your flake doesn't use Snowfall's `systems/<arch>/<hostname>/` convention:
 
 `noa-install` is safe to re-run against the same host. If
 `<secrets-repo>/systems/<hostname>/sshkeys/{ed25519,rsa}.yaml` already exist, it skips straight to
-staging the existing keys and running `nixos-anywhere` again - it won't regenerate keys or touch
-`.sops.yaml`. It does still run `sync-sops-recipients` every time, so any secrets file whose rule
+staging the existing keys and running `nixos-anywhere` again - it won't regenerate keys. A hand-kept
+`.sops.yaml` isn't touched; with sops-compose the host's key is upserted again, which changes nothing
+unless it went missing from `sops/keys/hosts.yaml`. It does still run `sync-sops-recipients` every time, so any secrets file whose rule
 includes the host but that was added or re-encrypted without it since the last run gets fixed on
 the re-run. This makes it reasonable to use for reinstalls, not just first-time provisioning.
 
@@ -173,7 +205,11 @@ the re-run. This makes it reasonable to use for reinstalls, not just first-time 
 - **`sops encrypt`/`create-ssh-host-keys` fails for a new host** - almost always means your
   `.sops.yaml` has no `creation_rules` entry matching `systems/<hostname>/sshkeys/*.yaml`. Add the
   rule shown above.
-- **`upsert-sops-age-key` warns `no creation_rules matched targets`** - your `--secrets-file` (default
+- **sops-compose refuses with `also covers ...; pass --allow-broad`** - the rule sops uses for
+  `--secrets-file` also covers other files, and adding the host to it would let the host decrypt
+  them too. Add a narrower rule for the file above it in `sops/rules.yaml`, or point
+  `--secrets-file` at a file with its own rule.
+- **`upsert-sops-age-key` warns `no creation_rules matched targets`** (hand-kept `.sops.yaml`) - your `--secrets-file` (default
   `secrets.yaml`) doesn't match any `path_regex` in `.sops.yaml`. Either add a matching rule, or pass
   `--secrets-file` pointing at whichever file's rule you want the new host referenced in - see the
   main README's flag table for `--secrets-file`/`--secrets-input`.

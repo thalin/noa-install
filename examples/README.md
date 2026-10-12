@@ -31,17 +31,22 @@ if it's missing; it's gitignored on purpose.)
 
 ## 2. Create the demo secrets repo's encrypted files
 
-`examples/secrets-repo/` ships `.sops.yaml` and a plaintext
-`secrets.example.yaml`, but the actual encrypted `secrets.yaml` and the admin
+`examples/secrets-repo/` ships [sops-compose](https://github.com/thalin/sops-compose)
+sources under `sops/`, the `.sops.yaml` rendered from them, and a plaintext
+`secrets.example.yaml`. The actual encrypted `secrets.yaml` and the admin
 age identity (`admin-key.txt`) are gitignored - generate your own:
 
 ```console
 age-keygen -o examples/secrets-repo/admin-key.txt
 ```
 
-It prints a public key (`age1...`). Open `examples/secrets-repo/.sops.yaml`
-and replace the value on the `&admin` line under `keys:` with it, so the
-demo repo's recipients match a key you actually hold.
+It prints a public key (`age1...`). Make it the demo's `users.admin` key, so
+the demo repo's recipients match a key you actually hold (this also
+re-renders `.sops.yaml`):
+
+```console
+nix run --inputs-from . sops-compose -- --root examples/secrets-repo add-key users.admin age1...
+```
 
 Then encrypt the example secrets file for that key:
 
@@ -69,8 +74,9 @@ This will, in order:
 1. Run `create-ssh-host-keys demo-vm` in `examples/secrets-repo`, generating
    `systems/demo-vm/sshkeys/{ed25519,rsa}.yaml` (sops-encrypted).
 2. Run `upsert-sops-age-key demo-vm`, deriving an age key from the new
-   ed25519 host key and adding it to `.sops.yaml` under `keys:` and the
-   `secrets.yaml`/`sshkeys` creation rules.
+   ed25519 host key, adding it as `hosts.demo-vm` in
+   `sops/keys/hosts.yaml` and re-rendering `.sops.yaml`. The `secrets.yaml`
+   rule uses `all`, so the host is a recipient as soon as its key exists.
 3. Run `sops updatekeys secrets.yaml` so it's re-encrypted for the new key.
 4. Decrypt the new SSH host keys and stage them as extra files.
 5. Run `nixos-anywhere --flake .#demo-vm --target-host root@127.0.0.1
@@ -91,6 +97,7 @@ ssh -i examples/demo-ssh-key -p 2222 root@127.0.0.1 hostname
 rm -f target-vm.qcow2 examples/known_hosts \
       examples/secrets-repo/admin-key.txt examples/secrets-repo/secrets.yaml
 rm -rf examples/secrets-repo/systems
+git checkout -- examples/secrets-repo/sops examples/secrets-repo/.sops.yaml
 ```
 
 then start again from step 1.
