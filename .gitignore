@@ -19,3 +19,6 @@ examples/known_hosts
 examples/secrets-repo/admin-key.txt
 examples/secrets-repo/secrets.yaml
 examples/secrets-repo/systems/
+
+# Ignore worktree directory
+.worktrees
